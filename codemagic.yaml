@@ -1,0 +1,304 @@
+# ==============================================================================
+#  CODEMAGIC CI/CD CONFIGURATION — Gasoline Station Companion App
+# ==============================================================================
+#  This file MUST live at the ROOT of your Git repository (not inside
+#  flutter_app/) — Codemagic only looks for codemagic.yaml at the repo root.
+#
+#  IMPORTANT — working_directory:
+#  This project's pubspec.yaml lives inside a subfolder (flutter_app/), not
+#  at the repo root, so every workflow below sets:
+#      working_directory: flutter_app
+#  If your repo layout differs (e.g. the Flutter project IS the repo root,
+#  or it's nested deeper like gasoline_station_project/flutter_app), update
+#  the working_directory value in BOTH workflows below to match. Everything
+#  else in this file stays the same.
+#
+#  WORKFLOWS INCLUDED:
+#    1. flutter-ci             — runs on every push/PR: analyze, test,
+#                                 build a debug APK. No signing keys
+#                                 required — safe to enable immediately.
+#    2. android-release        — builds a signed release AAB for Google
+#                                 Play. DISABLED by default (signing/
+#                                 publishing blocks are commented out)
+#                                 since no keystore or Play Console service
+#                                 account has been configured yet.
+#    3. ios-unsigned-sideload   — builds an UNSIGNED .ipa for manual
+#                                 sideloading via AltStore/SideStore, using
+#                                 a free Apple ID (no paid Developer
+#                                 Program enrollment needed). Enabled by
+#                                 default -- no signing setup required,
+#                                 since it deliberately produces an
+#                                 unsigned artifact.
+# ==============================================================================
+
+workflows:
+
+  # ============================================================================
+  # WORKFLOW 1 — Continuous Integration (analyze + test + debug build)
+  # ============================================================================
+  # Triggers automatically on every push and every pull request targeting
+  # any branch. This is the workflow to enable first — it catches broken
+  # builds, failing tests, and analyzer warnings before anything reaches a
+  # release build, and needs no signing configuration at all.
+  flutter-ci:
+    name: Flutter CI (analyze, test, debug build)
+    # linux_x2 is used instead of a mac machine because this workflow only
+    # builds Android (debug APK) — no iOS/macOS step here, so a Mac instance
+    # would just cost more for no benefit. Switch to mac_mini_m2 only if you
+    # add an iOS build step to this workflow later.
+    instance_type: linux_x2
+    max_build_duration: 30
+    working_directory: flutter_app
+
+    environment:
+      flutter: stable
+      vars:
+        # Purely informational — printed in build logs to make it obvious
+        # which app/version this CI run belongs to at a glance.
+        APP_NAME: "Gasoline Station Companion App"
+
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: "*"
+          include: true
+          source: true
+      # If two commits land on the same branch in quick succession, cancel
+      # the older in-flight build rather than wasting minutes running both.
+      cancel_previous_builds: true
+
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+
+    scripts:
+      - name: Flutter version info
+        script: |
+          flutter --version
+
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Flutter analyze
+        script: |
+          flutter analyze --no-fatal-infos
+        # A failing analyze should fail the whole build, not just warn —
+        # this is exactly the kind of mistake (undefined getter, mismatched
+        # constructor args, unbalanced widget tree) that's cropped up while
+        # building this app, and CI is the right place to catch it
+        # automatically rather than relying on manually reading error logs.
+        ignore_failure: false
+
+      - name: Flutter unit tests
+        script: |
+          flutter test
+        ignore_failure: false
+
+      - name: Build debug APK
+        script: |
+          flutter build apk --debug
+
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/**/reports/**
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - your_email@example.com   # <-- replace with your real email
+        notify:
+          success: false   # set true if you want an email on every green build
+          failure: true     # get notified when CI breaks
+
+
+  # ============================================================================
+  # WORKFLOW 2 — Android Release Build (signed AAB for Google Play)
+  # ============================================================================
+  # DISABLED BY DEFAULT. The android_signing and google_play publishing
+  # blocks are commented out because this project does not yet have:
+  #   (a) a Codemagic-managed keystore (or your own upload keystore), and
+  #   (b) a Google Play service account JSON credential.
+  #
+  # HOW TO ENABLE THIS WORKFLOW WHEN YOU'RE READY TO PUBLISH:
+  #   1. In Codemagic: App settings > Code signing identities > Android >
+  #      generate or upload a keystore. Note the reference name it's saved
+  #      under (this becomes what you put in android_signing: below).
+  #   2. In Google Play Console: create a service account with "Release
+  #      Manager" access, download its JSON key, and add it in Codemagic
+  #      as an encrypted environment variable named
+  #      GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (put it in a group, e.g.
+  #      "google_play", referenced under environment.groups below).
+  #   3. Uncomment every block below marked "# UNCOMMENT WHEN READY".
+  #   4. Replace PACKAGE_NAME with your actual applicationId from
+  #      android/app/build.gradle (currently a placeholder).
+  #
+  # Until then, this workflow will fail if triggered — that's intentional,
+  # since running it without signing configured would just waste build
+  # minutes on a guaranteed failure.
+  android-release:
+    name: Android Release (signed AAB)
+    instance_type: linux_x2
+    max_build_duration: 60
+    working_directory: flutter_app
+
+    environment:
+      flutter: stable
+      vars:
+        # Replace with the real applicationId from
+        # flutter_app/android/app/build.gradle (look for `applicationId`
+        # under android { defaultConfig { ... } }).
+        PACKAGE_NAME: "com.example.gasoline_station_app"  # <-- REPLACE THIS
+        GOOGLE_PLAY_TRACK: "internal"   # internal | alpha | beta | production
+      # UNCOMMENT WHEN READY (step 1 above):
+      # android_signing:
+      #   - gasoline_station_keystore   # <-- match the reference name from Codemagic
+      # UNCOMMENT WHEN READY (step 2 above):
+      # groups:
+      #   - google_play   # <-- must contain GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+
+    # This workflow is manual-trigger only (no push/PR auto-trigger) since
+    # release builds should be a deliberate action, not something that
+    # fires on every commit. Start it manually from the Codemagic dashboard
+    # (Start new build > select this workflow) when you're ready to cut a
+    # release.
+
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Flutter analyze
+        script: |
+          flutter analyze --no-fatal-infos
+
+      - name: Flutter unit tests
+        script: |
+          flutter test
+
+      # UNCOMMENT WHEN READY — requires GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+      # to be set (step 2 above). Without it, this script has no way to know
+      # the next build number, so it's commented out along with the signing
+      # config it depends on.
+      # - name: Build AAB with auto-incremented version
+      #   script: |
+      #     LATEST_BUILD_NUMBER=$(($(google-play get-latest-build-number \
+      #       --package-name "$PACKAGE_NAME" \
+      #       --tracks="$GOOGLE_PLAY_TRACK")))
+      #     flutter build appbundle --release \
+      #       --build-name=1.0.$LATEST_BUILD_NUMBER \
+      #       --build-number=$LATEST_BUILD_NUMBER
+
+      # Fallback build step used WHILE signing/publishing are not yet
+      # configured — produces an unsigned release AAB purely to confirm the
+      # release build compiles. Remove this once the block above is
+      # uncommented (they do the same job; only one should run).
+      - name: Build AAB (unsigned placeholder — remove once signing is set up)
+        script: |
+          flutter build appbundle --release
+
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - your_email@example.com   # <-- replace with your real email
+        notify:
+          success: true
+          failure: true
+      # UNCOMMENT WHEN READY (steps 1 and 2 above):
+      # google_play:
+      #   credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+      #   track: $GOOGLE_PLAY_TRACK
+      #   submit_as_draft: true   # keeps it out of the track until you manually promote it
+
+
+  # ============================================================================
+  # WORKFLOW 3 — iOS Unsigned Build (free Apple ID, sideload via AltStore/SideStore)
+  # ============================================================================
+  # This is deliberately NOT a signed/distributable build. A completely free
+  # Apple ID (no $99/year Apple Developer Program enrollment) only gets
+  # "Personal Team" signing, and Personal Team signing is a LOCAL Xcode
+  # concept — it can't be used by a remote CI machine like Codemagic's. So
+  # instead of trying to sign here, this workflow builds an UNSIGNED .ipa.
+  # The actual signing happens afterwards, on your own device, when
+  # AltStore/SideStore (both free) install it using your Apple ID directly —
+  # that's also where the "resign every 7 days" limitation of a free account
+  # applies; it's a limitation of the free account itself, not something any
+  # CI configuration can work around.
+  #
+  # `flutter build ipa` (the normal release command) refuses to run without
+  # a signing team, so this workflow uses `flutter build ios --release
+  # --no-codesign` instead, then manually packages the resulting Runner.app
+  # into a Payload/*.ipa zip archive -- the same manual packaging approach
+  # used for unsigned sideload distribution generally.
+  ios-unsigned-sideload:
+    name: iOS Unsigned Build (free account, sideload via AltStore/SideStore)
+    # Building for iOS requires Xcode, so this must run on a Mac instance
+    # even though no code signing happens -- CocoaPods and the iOS build
+    # toolchain are macOS-only, regardless of signing.
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    working_directory: flutter_app
+
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    # Manual-trigger only, same reasoning as android-release: producing a
+    # new sideload build is a deliberate action (you'll need to reinstall
+    # it via AltStore/SideStore afterwards), not something that should fire
+    # automatically on every push.
+
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+
+      - name: Install CocoaPods dependencies
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+
+      - name: Build unsigned iOS app
+        script: |
+          flutter build ios --release --no-codesign
+
+      - name: Package into unsigned .ipa
+        script: |
+          set -e
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r gasoline_station_app.ipa Payload
+          echo "Built: $(pwd)/gasoline_station_app.ipa"
+
+    artifacts:
+      - build/ios/iphoneos/*.ipa
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - your_email@example.com   # <-- replace with your real email
+        notify:
+          success: true
+          failure: true
+      # No app_store_connect or testflight publishing block here on purpose
+      # -- both require a paid Apple Developer Program account. Download
+      # the .ipa artifact from the Codemagic build page (or from the email
+      # notification above) and install it via AltStore or SideStore.
