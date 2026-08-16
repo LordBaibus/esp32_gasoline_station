@@ -109,7 +109,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your_email@example.com   # <-- replace with your real email
+          - jairusmaniago0204@gmail.com  
         notify:
           success: false   # set true if you want an email on every green build
           failure: true     # get notified when CI breaks
@@ -212,7 +212,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your_email@example.com   # <-- replace with your real email
+          - jairusmaniago0204@gmail.com   # <-- replace with your real email
         notify:
           success: true
           failure: true
@@ -294,7 +294,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your_email@example.com   # <-- replace with your real email
+          - jairusmaniago0204@gmail.com   # <-- replace with your real email
         notify:
           success: true
           failure: true
